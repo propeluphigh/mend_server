@@ -6,4 +6,6 @@ environment:
 
 dependencies:
   http: ^1.1.0
-  web_socket_channel: ^2.4.0 
+  web_socket_channel: ^2.4.0
+  record: ^4.4.4
+  path_provider: ^2.1.1 

@@ -219,7 +219,8 @@ async def stream_audio(websocket: WebSocket):
         print(f"Client {websocket.client} disconnected from streaming")
     except Exception as e:
         print(f"Error in streaming connection: {e}")
-        await websocket.close(code=1011)
+        if not websocket.client_state.DISCONNECTED:
+            await websocket.close(code=1011)
 
 @app.websocket("/enroll/{profile_name}")
 async def enroll_speaker(websocket: WebSocket, profile_name: str):
@@ -236,7 +237,8 @@ async def enroll_speaker(websocket: WebSocket, profile_name: str):
         print(f"Client {websocket.client} disconnected from enrollment")
     except Exception as e:
         print(f"Error in enrollment connection: {e}")
-        await websocket.close(code=1011)
+        if not websocket.client_state.DISCONNECTED:
+            await websocket.close(code=1011)
 
 @app.get("/speakers")
 async def list_speakers() -> List[str]:
@@ -255,14 +257,17 @@ def main():
     # Configure logging
     uvicorn.config.LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s - %(levelname)s - %(message)s"
     
-    # Run with production settings
+    # Run with production settings and WebSocket support
     uvicorn.run(
         app,
         host=args.host,
         port=args.port,
         log_level="info",
         proxy_headers=True,
-        forwarded_allow_ips="*"
+        forwarded_allow_ips="*",
+        ws_ping_interval=20.0,  # Send ping frames every 20 seconds
+        ws_ping_timeout=20.0,   # Wait 20 seconds for pong response
+        ws='websockets'         # Use websockets package for WebSocket support
     )
 
 if __name__ == "__main__":
