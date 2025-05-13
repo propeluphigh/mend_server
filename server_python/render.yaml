@@ -8,19 +8,17 @@ services:
         sync: false # This will prompt you to enter it securely in Render dashboard
       - key: PROFILES_DIR
         value: ./profiles
+      - key: PORT
+        value: 10000
     healthCheckPath: /speakers
     buildCommand: docker build -t speech-recognition-api .
-    startCommand: docker run -p $PORT:8000 speech-recognition-api
+    startCommand: docker run -p $PORT:$PORT speech-recognition-api
     disk:
       name: profiles
       mountPath: /data/profiles
       sizeGB: 1
     routes:
       - type: rewrite
-        source: /stream
-        destination: /stream
-        websocket: true
-      - type: rewrite
-        source: /enroll/*
-        destination: /enroll/*
+        source: /*
+        destination: /*
         websocket: true

@@ -44,73 +44,81 @@ Future<void> testStreamingApi({String? deployedUrl}) async {
   final baseUrl =
       deployedUrl != null ? 'wss://$deployedUrl' : 'ws://localhost:8000';
 
+  // For Render deployment, use port 10000
+  final port = deployedUrl != null ? ':10000' : '';
+  final wsUrl = '$baseUrl$port';
+
   final generator = AudioFrameGenerator();
 
-  print('Testing real-time streaming API at: $baseUrl');
+  print('Testing real-time streaming API at: $wsUrl');
 
   // 1. Test enrollment
   print('\nTesting enrollment streaming...');
-  final enrollWs = IOWebSocketChannel.connect(
-      '$baseUrl/enroll/test_speaker_streaming',
-      protocols: ['wss'] // Required for secure WebSocket
-      );
-
-  var enrollTimer = Timer.periodic(Duration(milliseconds: 32), (timer) async {
-    final frame = generator.generateFrame();
-    try {
-      enrollWs.sink.add(frame);
-    } catch (e) {
-      print('Error sending enrollment frame: $e');
-      timer.cancel();
-    }
-  });
-
-  // Listen for enrollment responses
   try {
-    await for (final message in enrollWs.stream) {
-      final response = json.decode(message);
-      print('Enrollment response: $response');
+    final enrollWs = IOWebSocketChannel.connect(
+        Uri.parse('$wsUrl/enroll/test_speaker_streaming'),
+        protocols: ['websocket']);
 
-      if (response['status'] == 'success' || response['status'] == 'error') {
-        enrollTimer.cancel();
-        enrollWs.sink.close();
-        break;
+    var enrollTimer = Timer.periodic(Duration(milliseconds: 32), (timer) async {
+      final frame = generator.generateFrame();
+      try {
+        enrollWs.sink.add(frame);
+      } catch (e) {
+        print('Error sending enrollment frame: $e');
+        timer.cancel();
       }
-    }
-  } catch (e) {
-    print('Error in enrollment stream: $e');
-    enrollTimer.cancel();
-    enrollWs.sink.close();
-  }
+    });
 
-  // 2. Test transcription streaming
-  print('\nTesting transcription streaming...');
-  final transcribeWs = IOWebSocketChannel.connect('$baseUrl/stream',
-      protocols: ['wss'] // Required for secure WebSocket
-      );
-
-  var transcribeTimer =
-      Timer.periodic(Duration(milliseconds: 32), (timer) async {
-    final frame = generator.generateFrame();
+    // Listen for enrollment responses
     try {
-      transcribeWs.sink.add(frame);
-    } catch (e) {
-      print('Error sending transcription frame: $e');
-      timer.cancel();
-    }
-  });
+      await for (final message in enrollWs.stream) {
+        final response = json.decode(message);
+        print('Enrollment response: $response');
 
-  // Listen for transcription responses
-  try {
-    await for (final message in transcribeWs.stream) {
-      final response = json.decode(message);
-      print('Transcription response: $response');
+        if (response['status'] == 'success' || response['status'] == 'error') {
+          enrollTimer.cancel();
+          await enrollWs.sink.close();
+          break;
+        }
+      }
+    } catch (e) {
+      print('Error in enrollment stream: $e');
+      enrollTimer.cancel();
+      await enrollWs.sink.close();
+    }
+
+    // 2. Test transcription streaming
+    print('\nTesting transcription streaming...');
+    final transcribeWs = IOWebSocketChannel.connect(Uri.parse('$wsUrl/stream'),
+        protocols: ['websocket']);
+
+    var transcribeTimer =
+        Timer.periodic(Duration(milliseconds: 32), (timer) async {
+      final frame = generator.generateFrame();
+      try {
+        transcribeWs.sink.add(frame);
+      } catch (e) {
+        print('Error sending transcription frame: $e');
+        timer.cancel();
+      }
+    });
+
+    // Listen for transcription responses
+    try {
+      await for (final message in transcribeWs.stream) {
+        final response = json.decode(message);
+        print('Transcription response: $response');
+      }
+    } catch (e) {
+      print('Error in transcription stream: $e');
+    } finally {
+      transcribeTimer.cancel();
+      await transcribeWs.sink.close();
     }
   } catch (e) {
-    print('Error in transcription stream: $e');
-  } finally {
-    transcribeTimer.cancel();
-    transcribeWs.sink.close();
+    print('Connection error: $e');
+    print(
+        'Make sure the server is running and WebSocket endpoints are accessible');
   }
 }
 
