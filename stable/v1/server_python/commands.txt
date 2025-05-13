@@ -1,4 +1,0 @@
-
-eagle_demo_mic enroll --access_key MkmcYRG6j7KaPf2uQd24hkd2xqHkhcOIXGt2cPy0s/sWa5TKHbTPMw== --output_profile_path ../profiles/profile2.bin
-
-eagle_demo_mic test --access_key MkmcYRG6j7KaPf2uQd24hkd2xqHkhcOIXGt2cPy0s/sWa5TKHbTPMw== --input_profile_paths ../profiles/profile.bin ../profiles/profile2.bin
