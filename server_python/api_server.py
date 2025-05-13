@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
@@ -71,14 +71,17 @@ class SpeechProcessor:
                 speaker_profiles=self.profiles
             )
 
-    def process_audio(self, audio_data: bytes) -> TranscriptionResponse:
-        # Skip WAV header (44 bytes) to get to PCM data
-        pcm_data = list(struct.unpack('h' * ((len(audio_data) - 44) // 2), audio_data[44:]))
+    def process_frame(self, frame_data: bytes) -> Optional[TranscriptionResponse]:
+        # Convert bytes to PCM data (assuming 16-bit audio)
+        pcm_data = list(struct.unpack('h' * (len(frame_data) // 2), frame_data))
         
+        if len(pcm_data) != 512:  # Ensure frame size is correct
+            return None
+
         # Process speaker identification
         speaker_scores = {}
         most_likely_speaker = "Unknown"
-        if self.eagle and len(pcm_data) > 0:
+        if self.eagle:
             try:
                 scores = self.eagle.process(pcm_data)
                 speaker_scores = {
@@ -93,64 +96,89 @@ class SpeechProcessor:
         # Process transcription
         transcript = ""
         try:
-            transcript, is_endpoint = self.cheetah.process(pcm_data)
-            if is_endpoint:
-                remaining_text = self.cheetah.flush()
-                if remaining_text:
-                    transcript += " " + remaining_text
+            partial_transcript, is_endpoint = self.cheetah.process(pcm_data)
+            if partial_transcript or is_endpoint:
+                transcript = partial_transcript
+                if is_endpoint:
+                    remaining_text = self.cheetah.flush()
+                    if remaining_text:
+                        transcript += " " + remaining_text
         except Exception as e:
             print(f"Transcription error: {str(e)}")
-            transcript = "Error processing audio"
 
-        return TranscriptionResponse(
-            transcript=transcript.strip(),
-            speaker_scores=speaker_scores,
-            most_likely_speaker=most_likely_speaker
-        )
+        if transcript or speaker_scores:
+            return TranscriptionResponse(
+                transcript=transcript.strip(),
+                speaker_scores=speaker_scores,
+                most_likely_speaker=most_likely_speaker
+            )
+        return None
 
-    async def enroll_speaker(self, profile_name: str, audio_data: bytes) -> EnrollmentResponse:
+    async def process_stream(self, websocket: WebSocket) -> None:
+        try:
+            while True:
+                frame_data = await websocket.receive_bytes()
+                result = self.process_frame(frame_data)
+                if result:
+                    await websocket.send_json(result.dict())
+        except Exception as e:
+            print(f"Stream processing error: {str(e)}")
+
+    async def enroll_speaker(self, profile_name: str, websocket: WebSocket) -> None:
         try:
             eagle_profiler = pveagle.create_profiler(access_key=self.access_key)
-            # Skip WAV header (44 bytes) to get to PCM data
-            pcm_data = list(struct.unpack('h' * ((len(audio_data) - 44) // 2), audio_data[44:]))
             
-            # Process enrollment
-            try:
-                enroll_percentage, feedback = eagle_profiler.enroll(pcm_data)
-                
-                if enroll_percentage >= 100.0:
-                    # Export and save profile
-                    profile = eagle_profiler.export()
-                    profile_path = os.path.join(self.profiles_dir, f"{profile_name}.bin")
+            while True:
+                try:
+                    frame_data = await websocket.receive_bytes()
+                    pcm_data = list(struct.unpack('h' * (len(frame_data) // 2), frame_data))
                     
-                    with open(profile_path, 'wb') as f:
-                        f.write(profile.to_bytes())
+                    if len(pcm_data) != 512:  # Ensure frame size is correct
+                        await websocket.send_json({
+                            "status": "error",
+                            "message": "Invalid frame size"
+                        })
+                        continue
+
+                    enroll_percentage, feedback = eagle_profiler.enroll(pcm_data)
                     
-                    # Update processor state
-                    self.speaker_labels.append(profile_name)
-                    self.profiles.append(profile)
+                    await websocket.send_json({
+                        "status": "progress",
+                        "percentage": enroll_percentage,
+                        "feedback": feedback
+                    })
                     
-                    # Reinitialize recognizer
-                    self.eagle = pveagle.create_recognizer(
-                        access_key=self.access_key,
-                        speaker_profiles=self.profiles
-                    )
+                    if enroll_percentage >= 100.0:
+                        # Export and save profile
+                        profile = eagle_profiler.export()
+                        profile_path = os.path.join(self.profiles_dir, f"{profile_name}.bin")
+                        
+                        with open(profile_path, 'wb') as f:
+                            f.write(profile.to_bytes())
+                        
+                        # Update processor state
+                        self.speaker_labels.append(profile_name)
+                        self.profiles.append(profile)
+                        
+                        # Reinitialize recognizer
+                        self.eagle = pveagle.create_recognizer(
+                            access_key=self.access_key,
+                            speaker_profiles=self.profiles
+                        )
+                        
+                        await websocket.send_json({
+                            "status": "success",
+                            "message": f"Profile {profile_name} created successfully"
+                        })
+                        break
+
+                except Exception as e:
+                    await websocket.send_json({
+                        "status": "error",
+                        "message": f"Error during enrollment: {str(e)}"
+                    })
+                    break
                     
-                    return EnrollmentResponse(
-                        status="success",
-                        message=f"Profile {profile_name} created successfully"
-                    )
-                else:
-                    return EnrollmentResponse(
-                        status="incomplete",
-                        message=f"Enrollment at {enroll_percentage:.1f}%. More audio needed."
-                    )
-            except Exception as e:
-                return EnrollmentResponse(
-                    status="error",
-                    message=f"Error during enrollment: {str(e)}"
-                )
-                
         finally:
             if 'eagle_profiler' in locals():
                 eagle_profiler.delete()
@@ -169,21 +197,23 @@ async def startup_event():
     
     speech_processor = SpeechProcessor(access_key, profiles_dir)
 
-@app.post("/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(audio: UploadFile = File(...)):
+@app.websocket("/stream")
+async def stream_audio(websocket: WebSocket):
     if not speech_processor:
-        raise HTTPException(status_code=500, detail="Speech processor not initialized")
-    
-    audio_data = await audio.read()
-    return speech_processor.process_audio(audio_data)
+        await websocket.close(code=1011, reason="Speech processor not initialized")
+        return
+        
+    await websocket.accept()
+    await speech_processor.process_stream(websocket)
 
-@app.post("/enroll", response_model=EnrollmentResponse)
-async def enroll_speaker(profile_name: str, audio: UploadFile = File(...)):
+@app.websocket("/enroll/{profile_name}")
+async def enroll_speaker(websocket: WebSocket, profile_name: str):
     if not speech_processor:
-        raise HTTPException(status_code=500, detail="Speech processor not initialized")
-    
-    audio_data = await audio.read()
-    return await speech_processor.enroll_speaker(profile_name, audio_data)
+        await websocket.close(code=1011, reason="Speech processor not initialized")
+        return
+        
+    await websocket.accept()
+    await speech_processor.enroll_speaker(profile_name, websocket)
 
 @app.get("/speakers")
 async def list_speakers() -> List[str]:
