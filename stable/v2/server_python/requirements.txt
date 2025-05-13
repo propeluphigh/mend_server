@@ -1,0 +1,3 @@
+pveagle==1.0.4
+pvrecorder==1.2.4
+websockets==12.0
