@@ -234,7 +234,7 @@ class ProfileManager {
 
 void main() async {
   try {
-    final serverUrl = 'wss://mend-server.onrender.com';
+    final serverUrl = 'ws://localhost:8001';
     final streamer = AudioStreamer(serverUrl);
 
     print('\nStarting audio streaming test...');

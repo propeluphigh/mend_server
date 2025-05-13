@@ -250,7 +250,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Speech Recognition API Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind the server to')
-    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8000')), help='Port to bind the server to')
+    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8001')), help='Port to bind the server to')
     
     args = parser.parse_args()
     
