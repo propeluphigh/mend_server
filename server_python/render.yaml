@@ -2,12 +2,15 @@ services:
   - type: web
     name: speech-recognition-api
     env: docker
-    plan: free
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PICOVOICE_ACCESS_KEY
         sync: false # This will prompt you to enter it securely in Render dashboard
       - key: PROFILES_DIR
-        value: /data/profiles
+        value: ./profiles
+    healthCheckPath: /speakers
+    buildCommand: docker build -t speech-recognition-api .
+    startCommand: docker run -p 8000:8000 speech-recognition-api
     disk:
       name: profiles
       mountPath: /data/profiles

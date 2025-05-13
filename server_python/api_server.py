@@ -195,11 +195,22 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Speech Recognition API Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind the server to')
-    parser.add_argument('--port', type=int, default=8000, help='Port to bind the server to')
+    parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8000')), help='Port to bind the server to')
     
     args = parser.parse_args()
     
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Configure logging
+    uvicorn.config.LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s - %(levelname)s - %(message)s"
+    
+    # Run with production settings
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*"
+    )
 
 if __name__ == "__main__":
     main() 
