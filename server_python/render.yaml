@@ -7,16 +7,20 @@ services:
       - key: PICOVOICE_ACCESS_KEY
         sync: false # This will prompt you to enter it securely in Render dashboard
       - key: PROFILES_DIR
-        value: ./profiles
+        value: /data/profiles
       - key: PORT
         value: 10000
-    healthCheckPath: /speakers
-    buildCommand: docker build -t speech-recognition-api .
-    startCommand: docker run -p $PORT:$PORT speech-recognition-api
+    healthCheckPath: /health
+    healthCheckTimeout: 30
+    autoDeploy: true
     disk:
       name: profiles
       mountPath: /data/profiles
       sizeGB: 1
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+      targetMemoryPercent: 80
     routes:
       - type: rewrite
         source: /*

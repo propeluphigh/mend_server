@@ -246,6 +246,11 @@ async def list_speakers() -> List[str]:
         raise HTTPException(status_code=500, detail="Speech processor not initialized")
     return speech_processor.speaker_labels
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration"""
+    return {"status": "healthy"}
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Speech Recognition API Server')
