@@ -72,27 +72,35 @@ class SpeechProcessor:
             )
 
     def process_audio(self, audio_data: bytes) -> TranscriptionResponse:
-        # Convert bytes to PCM data
-        pcm_data = list(struct.unpack('h' * (len(audio_data) // 2), audio_data))
+        # Skip WAV header (44 bytes) to get to PCM data
+        pcm_data = list(struct.unpack('h' * ((len(audio_data) - 44) // 2), audio_data[44:]))
         
         # Process speaker identification
         speaker_scores = {}
         most_likely_speaker = "Unknown"
         if self.eagle and len(pcm_data) > 0:
-            scores = self.eagle.process(pcm_data)
-            speaker_scores = {
-                label: float(score) 
-                for label, score in zip(self.speaker_labels, scores)
-            }
-            if speaker_scores:
-                most_likely_speaker = max(speaker_scores.items(), key=lambda x: x[1])[0]
+            try:
+                scores = self.eagle.process(pcm_data)
+                speaker_scores = {
+                    label: float(score) 
+                    for label, score in zip(self.speaker_labels, scores)
+                }
+                if speaker_scores:
+                    most_likely_speaker = max(speaker_scores.items(), key=lambda x: x[1])[0]
+            except Exception as e:
+                print(f"Speaker identification error: {str(e)}")
 
         # Process transcription
-        transcript, is_endpoint = self.cheetah.process(pcm_data)
-        if is_endpoint:
-            remaining_text = self.cheetah.flush()
-            if remaining_text:
-                transcript += " " + remaining_text
+        transcript = ""
+        try:
+            transcript, is_endpoint = self.cheetah.process(pcm_data)
+            if is_endpoint:
+                remaining_text = self.cheetah.flush()
+                if remaining_text:
+                    transcript += " " + remaining_text
+        except Exception as e:
+            print(f"Transcription error: {str(e)}")
+            transcript = "Error processing audio"
 
         return TranscriptionResponse(
             transcript=transcript.strip(),
@@ -103,37 +111,44 @@ class SpeechProcessor:
     async def enroll_speaker(self, profile_name: str, audio_data: bytes) -> EnrollmentResponse:
         try:
             eagle_profiler = pveagle.create_profiler(access_key=self.access_key)
-            pcm_data = list(struct.unpack('h' * (len(audio_data) // 2), audio_data))
+            # Skip WAV header (44 bytes) to get to PCM data
+            pcm_data = list(struct.unpack('h' * ((len(audio_data) - 44) // 2), audio_data[44:]))
             
             # Process enrollment
-            enroll_percentage, feedback = eagle_profiler.enroll(pcm_data)
-            
-            if enroll_percentage >= 100.0:
-                # Export and save profile
-                profile = eagle_profiler.export()
-                profile_path = os.path.join(self.profiles_dir, f"{profile_name}.bin")
+            try:
+                enroll_percentage, feedback = eagle_profiler.enroll(pcm_data)
                 
-                with open(profile_path, 'wb') as f:
-                    f.write(profile.to_bytes())
-                
-                # Update processor state
-                self.speaker_labels.append(profile_name)
-                self.profiles.append(profile)
-                
-                # Reinitialize recognizer
-                self.eagle = pveagle.create_recognizer(
-                    access_key=self.access_key,
-                    speaker_profiles=self.profiles
-                )
-                
+                if enroll_percentage >= 100.0:
+                    # Export and save profile
+                    profile = eagle_profiler.export()
+                    profile_path = os.path.join(self.profiles_dir, f"{profile_name}.bin")
+                    
+                    with open(profile_path, 'wb') as f:
+                        f.write(profile.to_bytes())
+                    
+                    # Update processor state
+                    self.speaker_labels.append(profile_name)
+                    self.profiles.append(profile)
+                    
+                    # Reinitialize recognizer
+                    self.eagle = pveagle.create_recognizer(
+                        access_key=self.access_key,
+                        speaker_profiles=self.profiles
+                    )
+                    
+                    return EnrollmentResponse(
+                        status="success",
+                        message=f"Profile {profile_name} created successfully"
+                    )
+                else:
+                    return EnrollmentResponse(
+                        status="incomplete",
+                        message=f"Enrollment at {enroll_percentage:.1f}%. More audio needed."
+                    )
+            except Exception as e:
                 return EnrollmentResponse(
-                    status="success",
-                    message=f"Profile {profile_name} created successfully"
-                )
-            else:
-                return EnrollmentResponse(
-                    status="incomplete",
-                    message=f"Enrollment at {enroll_percentage:.1f}%. More audio needed."
+                    status="error",
+                    message=f"Error during enrollment: {str(e)}"
                 )
                 
         finally:
