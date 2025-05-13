@@ -227,6 +227,7 @@ async def startup_event():
 @app.websocket("/stream")
 async def stream_audio(websocket: WebSocket):
     if not speech_processor:
+        print("Error: Speech processor not initialized")
         await websocket.close(code=1011, reason="Speech processor not initialized")
         return
     
@@ -234,17 +235,30 @@ async def stream_audio(websocket: WebSocket):
     try:
         await websocket.accept()
         print(f"Streaming connection accepted for {websocket.client}")
+        
+        # Send initial connection success message
+        await websocket.send_json({
+            "status": "connected",
+            "message": "WebSocket connection established"
+        })
+        
         await speech_processor.process_stream(websocket)
-    except WebSocketDisconnect:
-        print(f"Client {websocket.client} disconnected from streaming")
+    except WebSocketDisconnect as e:
+        print(f"Client {websocket.client} disconnected from streaming with code {e.code}")
     except Exception as e:
-        print(f"Error in streaming connection: {e}")
-        if not websocket.client_state.DISCONNECTED:
-            await websocket.close(code=1011)
+        print(f"Error in streaming connection: {str(e)}")
+        error_msg = {"status": "error", "message": str(e)}
+        try:
+            if not websocket.client_state.DISCONNECTED:
+                await websocket.send_json(error_msg)
+                await websocket.close(code=1011)
+        except:
+            pass
 
 @app.websocket("/enroll/{profile_name}")
 async def enroll_speaker(websocket: WebSocket, profile_name: str):
     if not speech_processor:
+        print("Error: Speech processor not initialized")
         await websocket.close(code=1011, reason="Speech processor not initialized")
         return
     
@@ -252,13 +266,25 @@ async def enroll_speaker(websocket: WebSocket, profile_name: str):
     try:
         await websocket.accept()
         print(f"Enrollment connection accepted for {websocket.client}")
+        
+        # Send initial connection success message
+        await websocket.send_json({
+            "status": "connected",
+            "message": f"WebSocket connection established for enrolling profile: {profile_name}"
+        })
+        
         await speech_processor.enroll_speaker(profile_name, websocket)
-    except WebSocketDisconnect:
-        print(f"Client {websocket.client} disconnected from enrollment")
+    except WebSocketDisconnect as e:
+        print(f"Client {websocket.client} disconnected from enrollment with code {e.code}")
     except Exception as e:
-        print(f"Error in enrollment connection: {e}")
-        if not websocket.client_state.DISCONNECTED:
-            await websocket.close(code=1011)
+        print(f"Error in enrollment connection: {str(e)}")
+        error_msg = {"status": "error", "message": str(e)}
+        try:
+            if not websocket.client_state.DISCONNECTED:
+                await websocket.send_json(error_msg)
+                await websocket.close(code=1011)
+        except:
+            pass
 
 @app.get("/speakers")
 async def list_speakers() -> List[str]:
