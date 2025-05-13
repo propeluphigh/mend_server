@@ -40,29 +40,36 @@ class AudioFrameGenerator {
 }
 
 Future<void> testStreamingApi({String? deployedUrl}) async {
-  // Use wss:// for deployed URL, ws:// for local
-  final baseUrl =
-      deployedUrl != null ? 'wss://$deployedUrl' : 'ws://localhost:8000';
-
-  // For Render deployment, use port 10000
-  final port = deployedUrl != null ? ':10000' : '';
-  final wsUrl = '$baseUrl$port';
+  // For local testing use ws://, for deployed use wss://
+  final wsScheme = deployedUrl != null ? 'wss' : 'ws';
+  final baseUri = Uri(
+    scheme: wsScheme,
+    host: deployedUrl ?? 'localhost',
+    port: deployedUrl != null ? null : 8000,
+  );
 
   final generator = AudioFrameGenerator();
 
-  print('Testing real-time streaming API at: $wsUrl');
+  print('Testing real-time streaming API');
+  print('Base URI: $baseUri');
 
   // 1. Test enrollment
   print('\nTesting enrollment streaming...');
-  try {
-    final enrollWs = IOWebSocketChannel.connect(
-        Uri.parse('$wsUrl/enroll/test_speaker_streaming'),
-        protocols: ['websocket']);
+  WebSocketChannel? enrollWs;
+  Timer? enrollTimer;
 
-    var enrollTimer = Timer.periodic(Duration(milliseconds: 32), (timer) async {
+  try {
+    final enrollUri = baseUri.replace(path: 'enroll/test_speaker_streaming');
+    print('Attempting connection to: $enrollUri');
+
+    enrollWs = WebSocketChannel.connect(enrollUri);
+    await enrollWs.ready;
+    print('WebSocket connection established for enrollment');
+
+    enrollTimer = Timer.periodic(Duration(milliseconds: 32), (timer) {
       final frame = generator.generateFrame();
       try {
-        enrollWs.sink.add(frame);
+        enrollWs?.sink.add(frame);
       } catch (e) {
         print('Error sending enrollment frame: $e');
         timer.cancel();
@@ -70,33 +77,39 @@ Future<void> testStreamingApi({String? deployedUrl}) async {
     });
 
     // Listen for enrollment responses
-    try {
-      await for (final message in enrollWs.stream) {
-        final response = json.decode(message);
-        print('Enrollment response: $response');
+    await for (final message in enrollWs.stream) {
+      final response = json.decode(message);
+      print('Enrollment response: $response');
 
-        if (response['status'] == 'success' || response['status'] == 'error') {
-          enrollTimer.cancel();
-          await enrollWs.sink.close();
-          break;
-        }
+      if (response['status'] == 'success' || response['status'] == 'error') {
+        enrollTimer.cancel();
+        await enrollWs.sink.close();
+        break;
       }
-    } catch (e) {
-      print('Error in enrollment stream: $e');
-      enrollTimer.cancel();
-      await enrollWs.sink.close();
     }
+  } catch (e) {
+    print('Enrollment connection error: $e');
+    enrollTimer?.cancel();
+    await enrollWs?.sink.close();
+  }
 
-    // 2. Test transcription streaming
-    print('\nTesting transcription streaming...');
-    final transcribeWs = IOWebSocketChannel.connect(Uri.parse('$wsUrl/stream'),
-        protocols: ['websocket']);
+  // 2. Test transcription streaming
+  print('\nTesting transcription streaming...');
+  WebSocketChannel? transcribeWs;
+  Timer? transcribeTimer;
 
-    var transcribeTimer =
-        Timer.periodic(Duration(milliseconds: 32), (timer) async {
+  try {
+    final transcribeUri = baseUri.replace(path: 'stream');
+    print('Attempting connection to: $transcribeUri');
+
+    transcribeWs = WebSocketChannel.connect(transcribeUri);
+    await transcribeWs.ready;
+    print('WebSocket connection established for transcription');
+
+    transcribeTimer = Timer.periodic(Duration(milliseconds: 32), (timer) {
       final frame = generator.generateFrame();
       try {
-        transcribeWs.sink.add(frame);
+        transcribeWs?.sink.add(frame);
       } catch (e) {
         print('Error sending transcription frame: $e');
         timer.cancel();
@@ -104,21 +117,15 @@ Future<void> testStreamingApi({String? deployedUrl}) async {
     });
 
     // Listen for transcription responses
-    try {
-      await for (final message in transcribeWs.stream) {
-        final response = json.decode(message);
-        print('Transcription response: $response');
-      }
-    } catch (e) {
-      print('Error in transcription stream: $e');
-    } finally {
-      transcribeTimer.cancel();
-      await transcribeWs.sink.close();
+    await for (final message in transcribeWs.stream) {
+      final response = json.decode(message);
+      print('Transcription response: $response');
     }
   } catch (e) {
-    print('Connection error: $e');
-    print(
-        'Make sure the server is running and WebSocket endpoints are accessible');
+    print('Transcription connection error: $e');
+  } finally {
+    transcribeTimer?.cancel();
+    await transcribeWs?.sink.close();
   }
 }
 
@@ -127,9 +134,11 @@ void main() async {
     // For local testing:
     // await testStreamingApi();
 
-    // For deployed testing (replace with your Render URL):
+    // For Render deployment:
     await testStreamingApi(deployedUrl: 'mend-server.onrender.com');
   } catch (e) {
     print('Error in main: $e');
+    print('Stack trace:');
+    print(StackTrace.current);
   }
 }

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
@@ -10,6 +10,7 @@ import pveagle
 import pvcheetah
 import struct
 from pydantic import BaseModel
+from fastapi import WebSocketDisconnect
 
 class TranscriptionResponse(BaseModel):
     transcript: str
@@ -29,11 +30,17 @@ app = FastAPI(
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add WebSocket exception handler
+@app.exception_handler(WebSocketDisconnect)
+async def websocket_disconnect_handler(request: Request, exc: WebSocketDisconnect):
+    print(f"WebSocket client disconnected with code: {exc.code}")
+    return None
 
 class SpeechProcessor:
     def __init__(self, access_key: str, profiles_dir: str):
@@ -202,18 +209,34 @@ async def stream_audio(websocket: WebSocket):
     if not speech_processor:
         await websocket.close(code=1011, reason="Speech processor not initialized")
         return
-        
-    await websocket.accept()
-    await speech_processor.process_stream(websocket)
+    
+    print(f"New streaming connection request from {websocket.client}")    
+    try:
+        await websocket.accept()
+        print(f"Streaming connection accepted for {websocket.client}")
+        await speech_processor.process_stream(websocket)
+    except WebSocketDisconnect:
+        print(f"Client {websocket.client} disconnected from streaming")
+    except Exception as e:
+        print(f"Error in streaming connection: {e}")
+        await websocket.close(code=1011)
 
 @app.websocket("/enroll/{profile_name}")
 async def enroll_speaker(websocket: WebSocket, profile_name: str):
     if not speech_processor:
         await websocket.close(code=1011, reason="Speech processor not initialized")
         return
-        
-    await websocket.accept()
-    await speech_processor.enroll_speaker(profile_name, websocket)
+    
+    print(f"New enrollment connection request from {websocket.client} for profile {profile_name}")
+    try:
+        await websocket.accept()
+        print(f"Enrollment connection accepted for {websocket.client}")
+        await speech_processor.enroll_speaker(profile_name, websocket)
+    except WebSocketDisconnect:
+        print(f"Client {websocket.client} disconnected from enrollment")
+    except Exception as e:
+        print(f"Error in enrollment connection: {e}")
+        await websocket.close(code=1011)
 
 @app.get("/speakers")
 async def list_speakers() -> List[str]:
