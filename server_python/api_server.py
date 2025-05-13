@@ -248,8 +248,20 @@ async def list_speakers() -> List[str]:
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for container orchestration"""
     return {"status": "healthy"}
+
+@app.get("/")
+async def root():
+    return {
+        "status": "running",
+        "message": "Speech Recognition API Server",
+        "available_endpoints": [
+            "/health",
+            "/speakers",
+            "/stream (WebSocket)",
+            "/enroll/{profile_name} (WebSocket)"
+        ]
+    }
 
 def main():
     import argparse

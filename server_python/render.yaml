@@ -10,6 +10,12 @@ services:
         value: /data/profiles
       - key: PORT
         value: 10000
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: WORKER_MAX_REQUESTS
+        value: "1000"
+      - key: WORKER_MAX_REQUESTS_JITTER
+        value: "50"
     healthCheckPath: /health
     healthCheckTimeout: 30
     autoDeploy: true
@@ -20,7 +26,12 @@ services:
     scaling:
       minInstances: 1
       maxInstances: 1
-      targetMemoryPercent: 80
+      targetMemoryPercent: 70
+      targetCPUPercent: 70
+    plan: standard
+    resources:
+      memory: 1024
+      cpu: 1
     routes:
       - type: rewrite
         source: /*
