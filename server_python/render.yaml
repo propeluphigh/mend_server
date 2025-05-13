@@ -5,15 +5,15 @@ services:
     dockerfilePath: ./Dockerfile
     envVars:
       - key: PICOVOICE_ACCESS_KEY
-        sync: false # This will prompt you to enter it securely in Render dashboard
+        sync: false
       - key: PROFILES_DIR
         value: /data/profiles
       - key: PORT
         value: 10000
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: WORKER_MAX_REQUESTS
-        value: "1000"
+        value: "500"
       - key: WORKER_MAX_REQUESTS_JITTER
         value: "50"
     healthCheckPath: /health
@@ -26,11 +26,11 @@ services:
     scaling:
       minInstances: 1
       maxInstances: 1
-      targetMemoryPercent: 70
-      targetCPUPercent: 70
+      targetMemoryPercent: 85
+      targetCPUPercent: 85
     plan: standard
     resources:
-      memory: 1024
+      memory: 2048
       cpu: 1
     routes:
       - type: rewrite

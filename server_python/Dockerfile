@@ -28,7 +28,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
-    PYTHONOPTIMIZE=1
+    PYTHONOPTIMIZE=2 \
+    PYTHONMALLOC=malloc \
+    PYTHONGC=1
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser
@@ -61,7 +63,7 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Command to run the application
 CMD gunicorn api_server:app \
-    --workers ${WEB_CONCURRENCY:-2} \
+    --workers ${WEB_CONCURRENCY:-1} \
     --worker-class uvicorn.workers.UvicornWorker \
     --bind 0.0.0.0:${PORT:-8000} \
     --timeout 120 \
@@ -70,6 +72,7 @@ CMD gunicorn api_server:app \
     --access-logfile - \
     --error-logfile - \
     --worker-tmp-dir /dev/shm \
-    --max-requests ${WORKER_MAX_REQUESTS:-1000} \
+    --max-requests ${WORKER_MAX_REQUESTS:-500} \
     --max-requests-jitter ${WORKER_MAX_REQUESTS_JITTER:-50} \
-    --preload 
+    --preload \
+    --worker-connections 100

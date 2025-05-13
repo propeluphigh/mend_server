@@ -50,20 +50,16 @@ class SpeechProcessor:
         self.cheetah = None
         self.speaker_labels = []
         self.profiles = []
-        self.initialize_engines()
-
-    def initialize_engines(self):
-        # Initialize Cheetah
-        self.cheetah = pvcheetah.create(
-            access_key=self.access_key,
-            endpoint_duration_sec=0.5,
-            enable_automatic_punctuation=True
-        )
-
-        # Load speaker profiles
+        self._load_profiles()  # Only load profiles initially
+        
+    def _load_profiles(self):
+        """Load speaker profiles without initializing engines"""
         if not os.path.exists(self.profiles_dir):
             os.makedirs(self.profiles_dir)
             
+        self.speaker_labels = []
+        self.profiles = []
+        
         for profile_file in os.listdir(self.profiles_dir):
             if profile_file.endswith('.bin'):
                 profile_path = os.path.join(self.profiles_dir, profile_file)
@@ -72,7 +68,18 @@ class SpeechProcessor:
                     profile = pveagle.EagleProfile.from_bytes(f.read())
                 self.profiles.append(profile)
 
-        if self.profiles:
+    def _ensure_cheetah_initialized(self):
+        """Lazy initialization of Cheetah"""
+        if self.cheetah is None:
+            self.cheetah = pvcheetah.create(
+                access_key=self.access_key,
+                endpoint_duration_sec=0.5,
+                enable_automatic_punctuation=True
+            )
+
+    def _ensure_eagle_initialized(self):
+        """Lazy initialization of Eagle"""
+        if self.eagle is None and self.profiles:
             self.eagle = pveagle.create_recognizer(
                 access_key=self.access_key,
                 speaker_profiles=self.profiles
@@ -88,8 +95,10 @@ class SpeechProcessor:
         # Process speaker identification
         speaker_scores = {}
         most_likely_speaker = "Unknown"
-        if self.eagle:
-            try:
+        
+        try:
+            self._ensure_eagle_initialized()
+            if self.eagle:
                 scores = self.eagle.process(pcm_data)
                 speaker_scores = {
                     label: float(score) 
@@ -97,12 +106,15 @@ class SpeechProcessor:
                 }
                 if speaker_scores:
                     most_likely_speaker = max(speaker_scores.items(), key=lambda x: x[1])[0]
-            except Exception as e:
-                print(f"Speaker identification error: {str(e)}")
+        except Exception as e:
+            print(f"Speaker identification error: {str(e)}")
+            # Reset eagle on error
+            self.eagle = None
 
         # Process transcription
         transcript = ""
         try:
+            self._ensure_cheetah_initialized()
             partial_transcript, is_endpoint = self.cheetah.process(pcm_data)
             if partial_transcript or is_endpoint:
                 transcript = partial_transcript
@@ -112,6 +124,8 @@ class SpeechProcessor:
                         transcript += " " + remaining_text
         except Exception as e:
             print(f"Transcription error: {str(e)}")
+            # Reset cheetah on error
+            self.cheetah = None
 
         if transcript or speaker_scores:
             return TranscriptionResponse(
@@ -130,6 +144,12 @@ class SpeechProcessor:
                     await websocket.send_json(result.dict())
         except Exception as e:
             print(f"Stream processing error: {str(e)}")
+        finally:
+            # Clean up resources
+            if self.cheetah:
+                self.cheetah = None
+            if self.eagle:
+                self.eagle = None
 
     async def enroll_speaker(self, profile_name: str, websocket: WebSocket) -> None:
         try:
